@@ -41,7 +41,7 @@ FIELDS TERMINATED BY '\t'
 STORED AS TEXTFILE
 LOCATION '${hivevar:OUTPUT}';
 
-INSERT INTO TABLE wm_wordcount
+INSERT OVERWRITE TABLE wm_wordcount
 SELECT
     word,
     COUNT(*) AS total

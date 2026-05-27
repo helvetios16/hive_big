@@ -9,8 +9,6 @@ Uso:
 """
 import os
 import sys
-import io
-import math
 import random
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -122,9 +120,17 @@ def write_local(text_file, target_mb=2):
 
 # ── S3 server-side copy ────────────────────────────────────────────────────────
 
+S3_MIN_PART_BYTES = 6 * 1024 * 1024  # S3 requiere >= 5 MB por part (usamos 6 MB de margen)
+
+
 def stream_to_s3_copy(base_data, target_mb, bucket):
     import boto3
     s3 = boto3.client("s3")
+
+    # Asegurar que cada part sea >= 5 MB (límite de S3 multipart)
+    if len(base_data) < S3_MIN_PART_BYTES:
+        repeats  = -(-S3_MIN_PART_BYTES // len(base_data))  # ceil division
+        base_data = base_data * repeats
 
     target_bytes = target_mb * 1024 * 1024
     actual_base  = len(base_data)
