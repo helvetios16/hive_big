@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Datos generados y estado de AWS (no versionar)
+wordmill/data/
+wordmill/.emr_state
+cartograph/data/
+cartograph/.emr_state
+duel/data/
+yellow_cab/data/
+yellow_cab/.emr_state
