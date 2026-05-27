@@ -122,8 +122,7 @@ STEP_ID=$(aws emr add-steps \
       \"--run-hive-script\",
       \"--args\",
       \"-f\",       \"s3://$BUCKET/hql/wordcount.hql\",
-      \"-hivevar\", \"INPUT=s3://$BUCKET/input/\",
-      \"-hivevar\", \"OUTPUT=s3://$BUCKET/output/\"
+      \"-hivevar\", \"INPUT=s3://$BUCKET/input/\"
     ]
   }]" \
   --query 'StepIds[0]' \
@@ -150,16 +149,11 @@ if [[ "$STATUS" == "COMPLETED" ]]; then
   echo "║   JOB COMPLETADO EXITOSAMENTE                    ║"
   echo "╚══════════════════════════════════════════════════╝"
   echo ""
-  echo "  Resultados en : s3://$BUCKET/output/"
+  echo "  Tabla creada  : wm_wordcount  (en Hive warehouse del cluster)"
   echo "  Logs en       : s3://$BUCKET/logs/"
   echo ""
-  echo "  ── Ver archivos de salida ───────────────────────"
-  echo "  aws s3 ls s3://$BUCKET/output/"
-  echo ""
-  echo "  ── Ver top 20 palabras ──────────────────────────"
-  # Descarga todos los part-files y ordena por frecuencia desc
-  echo "  aws s3 cp s3://$BUCKET/output/ ./output/ --recursive --exclude \"*_SUCCESS\""
-  echo "  cat output/0* | sort -t\$'\\t' -k2 -rn | head -20"
+  echo "  ── Ver resultados de las consultas (stdout del step) ──"
+  echo "  aws s3 cp s3://$BUCKET/logs/$CLUSTER_ID/steps/$STEP_ID/stdout.gz - | gunzip -c"
   echo ""
   echo "  ── Terminar cluster (evitar costos) ─────────────"
   echo "  aws emr terminate-clusters --cluster-ids $CLUSTER_ID"
