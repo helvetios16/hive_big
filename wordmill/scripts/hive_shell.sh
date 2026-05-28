@@ -2,9 +2,6 @@
 # =============================================================================
 # hive_shell.sh — Abre sesión Hive interactiva en el master via EC2 Instance Connect
 #
-# No requiere haber configurado un key pair al crear el cluster.
-# Genera una key temporal, la empuja al master (válida 60s) y conecta.
-#
 # Uso:
 #   bash wordmill/scripts/hive_shell.sh
 # =============================================================================
@@ -43,15 +40,36 @@ MASTER_ID=$(aws emr list-instances \
   --query 'Instances[0].Ec2InstanceId' --output text)
 
 AZ=$(aws ec2 describe-instances \
-  --region "$REGION" \
-  --instance-ids "$MASTER_ID" \
+  --region "$REGION" --instance-ids "$MASTER_ID" \
   --query 'Reservations[0].Instances[0].Placement.AvailabilityZone' --output text)
 
 echo "  Master DNS : $MASTER_DNS"
 echo "  Instance   : $MASTER_ID  ($AZ)"
 
+# ── Abrir puerto 22 para la IP actual ────────────────────────────────────────
+# tr -d quita el newline que curl añade al final
+MY_IP=$(curl -s https://checkip.amazonaws.com | tr -d '[:space:]')
+SG=$(aws emr describe-cluster \
+  --cluster-id "$CLUSTER_ID" --region "$REGION" \
+  --query 'Cluster.Ec2InstanceAttributes.EmrManagedMasterSecurityGroup' --output text)
+
+echo "  Abriendo puerto 22 para $MY_IP en $SG..."
+if aws ec2 authorize-security-group-ingress \
+     --region "$REGION" \
+     --group-id "$SG" \
+     --protocol tcp --port 22 --cidr "${MY_IP}/32" 2>/dev/null; then
+  echo "  ✓ Regla añadida."
+else
+  echo "  (regla ya existía, continuando)"
+fi
+
 # ── Generar key temporal ──────────────────────────────────────────────────────
-TMP_KEY=$(mktemp /tmp/emr_tmp_key_XXXX)
+TMP_KEY="/tmp/emr_hive_$$"
+rm -f "$TMP_KEY" "${TMP_KEY}.pub"
+
+# Trap: limpiar key aunque el script falle o el usuario haga Ctrl+C
+trap 'rm -f "$TMP_KEY" "${TMP_KEY}.pub"' EXIT
+
 ssh-keygen -t rsa -b 2048 -f "$TMP_KEY" -N "" -q
 echo "  Key temporal generada."
 
@@ -61,19 +79,18 @@ aws ec2-instance-connect send-ssh-public-key \
   --instance-id "$MASTER_ID" \
   --availability-zone "$AZ" \
   --instance-os-user hadoop \
-  --ssh-public-key "file://${TMP_KEY}.pub"
+  --ssh-public-key "file://${TMP_KEY}.pub" \
+  --output text --query 'Success' > /dev/null
 
 echo ""
-echo "  Key enviada — tienes 60 segundos para conectar."
-echo "  Abriendo Hive... (escribe 'exit;' para salir)"
+echo "  Conectando... Hive puede tardar ~20s en arrancar."
+echo "  Escribe 'exit;' para salir de Hive."
 echo ""
 
-# ── Conectar y lanzar Hive ────────────────────────────────────────────────────
+# ── SSH al master y lanzar Hive ───────────────────────────────────────────────
 ssh -i "$TMP_KEY" \
     -o StrictHostKeyChecking=no \
     -o ServerAliveInterval=30 \
+    -o ConnectTimeout=15 \
     -t hadoop@"$MASTER_DNS" \
-    "hive"
-
-# ── Limpiar key temporal ──────────────────────────────────────────────────────
-rm -f "$TMP_KEY" "${TMP_KEY}.pub"
+    "hive" || true   # 'true' evita que set -e corte el script si Hive sale con código != 0
