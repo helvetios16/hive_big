@@ -14,13 +14,15 @@ set -euo pipefail
 
 BUCKET="mi-hive-wordmill"
 REGION="us-east-1"
+KEY_PAIR=""
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HQL_LOCAL="$ROOT_DIR/wordmill/hql/wordcount.hql"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --bucket) BUCKET="$2"; shift 2 ;;
-    --region) REGION="$2"; shift 2 ;;
+    --bucket)   BUCKET="$2";   shift 2 ;;
+    --region)   REGION="$2";   shift 2 ;;
+    --key-pair) KEY_PAIR="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -85,6 +87,12 @@ echo "[ 3/4 ] Creando cluster EMR (1 master + 1 core m4.large)..."
 echo "        Aplicaciones: Hadoop + Hive"
 echo "        (puede tardar 5-10 min)"
 
+EC2_ATTRS=""
+if [[ -n "$KEY_PAIR" ]]; then
+  EC2_ATTRS="--ec2-attributes KeyName=$KEY_PAIR"
+  echo "        Key pair : $KEY_PAIR"
+fi
+
 CLUSTER_ID=$(aws emr create-cluster \
   --name "WordCount-Hive-wordmill" \
   --release-label emr-7.0.0 \
@@ -97,6 +105,7 @@ CLUSTER_ID=$(aws emr create-cluster \
   --log-uri "s3://$BUCKET/logs/" \
   --no-auto-terminate \
   --enable-debugging \
+  $EC2_ATTRS \
   --query 'ClusterId' \
   --output text)
 
