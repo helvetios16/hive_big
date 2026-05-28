@@ -42,10 +42,10 @@ MASTER_ID=$(aws emr list-instances \
   --instance-group-type MASTER \
   --query 'Instances[0].Ec2InstanceId' --output text)
 
-AZ=$(aws emr list-instances \
-  --cluster-id "$CLUSTER_ID" --region "$REGION" \
-  --instance-group-type MASTER \
-  --query 'Instances[0].Placement.AvailabilityZone' --output text)
+AZ=$(aws ec2 describe-instances \
+  --region "$REGION" \
+  --instance-ids "$MASTER_ID" \
+  --query 'Reservations[0].Instances[0].Placement.AvailabilityZone' --output text)
 
 echo "  Master DNS : $MASTER_DNS"
 echo "  Instance   : $MASTER_ID  ($AZ)"
