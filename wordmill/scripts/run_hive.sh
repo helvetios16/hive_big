@@ -16,7 +16,7 @@ BUCKET="mi-hive-wordmill"
 REGION="us-east-1"
 KEY_PAIR=""
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-HQL_LOCAL="$ROOT_DIR/wordmill/hql/wordcount.hql"
+HQL_LOCAL="$ROOT_DIR/wordmill/hql/setup.hql"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,9 +53,9 @@ echo "✓ input/text.txt encontrado."
 echo ""
 
 # ── Subir HQL a S3 ────────────────────────────────────────────────────────────
-echo "[ 1/4 ] Subiendo wordcount.hql a S3..."
-aws s3 cp "$HQL_LOCAL" "s3://$BUCKET/hql/wordcount.hql"
-echo "        ✓ hql/wordcount.hql  →  s3://$BUCKET/hql/"
+echo "[ 1/4 ] Subiendo setup.hql a S3..."
+aws s3 cp "$HQL_LOCAL" "s3://$BUCKET/hql/setup.hql"
+echo "        ✓ hql/setup.hql  →  s3://$BUCKET/hql/"
 
 # ── Verificar/crear roles IAM ─────────────────────────────────────────────────
 echo ""
@@ -80,6 +80,28 @@ cleanup() {
   exit 1
 }
 trap cleanup INT TERM
+
+# ── Espera con timer ──────────────────────────────────────────────────────────
+# Sondea el estado e imprime el tiempo transcurrido cada POLL segundos, en vez
+# de bloquear en silencio (CloudShell se desconecta tras ~20-30 min sin
+# actividad). Args: $1=descripción  $2=comando-de-estado  $3=estados-OK(regex)
+#                   $4=estados-FALLO(regex)
+POLL=30
+LAST_ELAPSED=""   # duración (mm:ss) de la última etapa esperada
+wait_con_timer() {
+  local label="$1" status_cmd="$2" ok_re="$3" fail_re="$4"
+  local start=$SECONDS state elapsed mmss
+  while true; do
+    state=$(eval "$status_cmd" 2>/dev/null || echo "?")
+    elapsed=$((SECONDS - start))
+    mmss=$(printf "%02d:%02d" $((elapsed / 60)) $((elapsed % 60)))
+    LAST_ELAPSED="$mmss"
+    printf "\r        [%s] %s: %-22s" "$mmss" "$label" "$state"
+    if [[ "$state" =~ $ok_re ]];   then printf "\n"; return 0; fi
+    if [[ "$state" =~ $fail_re ]]; then printf "\n"; return 1; fi
+    sleep "$POLL"
+  done
+}
 
 # ── Crear cluster EMR con Hadoop + Hive ───────────────────────────────────────
 echo ""
@@ -110,27 +132,45 @@ CLUSTER_ID=$(aws emr create-cluster \
   --output text)
 
 echo "        Cluster ID: $CLUSTER_ID"
-echo "        Esperando estado WAITING..."
-aws emr wait cluster-running --cluster-id "$CLUSTER_ID" --region "$REGION"
-echo "        ✓ Cluster listo."
 
-# ── Lanzar step de Hive ───────────────────────────────────────────────────────
+# Guardar estado YA: si CloudShell se cae, el cluster sigue vivo
+# (--no-auto-terminate) y puedes reconectar / limpiar con estos IDs.
+{
+  echo "CLUSTER_ID=$CLUSTER_ID"
+  echo "BUCKET=$BUCKET"
+  echo "REGION=$REGION"
+} > "$ROOT_DIR/wordmill/.emr_state"
+
+echo "        (IDs guardados en wordmill/.emr_state)"
+echo "        Esperando estado WAITING..."
+wait_con_timer "cluster" \
+  "aws emr describe-cluster --cluster-id $CLUSTER_ID --region $REGION --query Cluster.Status.State --output text" \
+  '^(WAITING|RUNNING)$' \
+  '^(TERMINATED|TERMINATED_WITH_ERRORS)$' || {
+    echo "ERROR: el cluster no llegó a estado activo."
+    aws emr terminate-clusters --cluster-ids "$CLUSTER_ID" --region "$REGION" 2>/dev/null || true
+    exit 1
+  }
+T_CLUSTER="$LAST_ELAPSED"
+echo "        ✓ Cluster listo  (aprovisionamiento: $T_CLUSTER)"
+
+# ── Lanzar step de Hive (solo prepara la tabla de entrada) ────────────────────
 echo ""
-echo "[ 4/4 ] Lanzando WordCount con Hive..."
+echo "[ 4/4 ] Preparando tabla de entrada (wm_input) con Hive..."
 
 STEP_ID=$(aws emr add-steps \
   --cluster-id "$CLUSTER_ID" \
   --region "$REGION" \
   --steps "[{
     \"Type\": \"CUSTOM_JAR\",
-    \"Name\": \"WordCount-HiveQL\",
+    \"Name\": \"Setup-Input-Hive\",
     \"ActionOnFailure\": \"CONTINUE\",
     \"Jar\": \"command-runner.jar\",
     \"Args\": [
       \"hive-script\",
       \"--run-hive-script\",
       \"--args\",
-      \"-f\",       \"s3://$BUCKET/hql/wordcount.hql\",
+      \"-f\",       \"s3://$BUCKET/hql/setup.hql\",
       \"-hivevar\", \"INPUT=s3://$BUCKET/input/\"
     ]
   }]" \
@@ -139,10 +179,12 @@ STEP_ID=$(aws emr add-steps \
 
 echo "        Step ID: $STEP_ID"
 echo "        Esperando que el job termine..."
-aws emr wait step-complete \
-  --cluster-id "$CLUSTER_ID" \
-  --step-id "$STEP_ID" \
-  --region "$REGION"
+wait_con_timer "step" \
+  "aws emr describe-step --cluster-id $CLUSTER_ID --step-id $STEP_ID --region $REGION --query Step.Status.State --output text" \
+  '^COMPLETED$' \
+  '^(FAILED|CANCELLED|INTERRUPTED)$' || true
+T_STEP="$LAST_ELAPSED"
+echo "        Duración del step (setup tabla): $T_STEP"
 
 STATUS=$(aws emr describe-step \
   --cluster-id "$CLUSTER_ID" \
@@ -155,14 +197,26 @@ STATUS=$(aws emr describe-step \
 echo ""
 echo "╔══════════════════════════════════════════════════╗"
 if [[ "$STATUS" == "COMPLETED" ]]; then
-  echo "║   JOB COMPLETADO EXITOSAMENTE                    ║"
+  echo "║   TABLA DE ENTRADA LISTA                         ║"
   echo "╚══════════════════════════════════════════════════╝"
   echo ""
-  echo "  Tabla creada  : wm_wordcount  (en Hive warehouse del cluster)"
+  echo "  Tabla creada  : wm_input  (texto crudo en S3, SIN contar)"
   echo "  Logs en       : s3://$BUCKET/logs/"
   echo ""
-  echo "  ── Ver resultados de las consultas (stdout del step) ──"
-  echo "  aws s3 cp s3://$BUCKET/logs/$CLUSTER_ID/steps/$STEP_ID/stdout.gz - | gunzip -c"
+  echo "  ── Tiempos ──────────────────────────────────────"
+  echo "    Aprovisionar cluster : $T_CLUSTER"
+  echo "    Setup tabla (step)   : $T_STEP"
+  echo ""
+  echo "  El conteo NO está precalculado: ejecútalo tú mismo en la"
+  echo "  sesión interactiva para medir cuánto tarda Hive."
+  echo ""
+  echo "  ── Abrir sesión Hive (requiere --key-pair en este paso) ──"
+  echo "  bash wordmill/scripts/hive_shell.sh"
+  echo ""
+  echo "  Dentro de Hive, pega el conteo (top 10) — ver wordmill/hql/queries.hql:"
+  echo "    SELECT word, COUNT(*) AS total FROM wm_input"
+  echo "    LATERAL VIEW EXPLODE(SPLIT(LOWER(line),'[^a-z]+')) t AS word"
+  echo "    WHERE LENGTH(word) > 1 GROUP BY word ORDER BY total DESC LIMIT 10;"
   echo ""
   echo "  ── Terminar cluster (evitar costos) ─────────────"
   echo "  aws emr terminate-clusters --cluster-ids $CLUSTER_ID"
@@ -179,9 +233,4 @@ else
   exit 1
 fi
 
-# Guardar estado para cleanup
-echo "CLUSTER_ID=$CLUSTER_ID" > "$ROOT_DIR/wordmill/.emr_state"
-echo "BUCKET=$BUCKET"        >> "$ROOT_DIR/wordmill/.emr_state"
-echo "REGION=$REGION"        >> "$ROOT_DIR/wordmill/.emr_state"
-echo ""
-echo "  (IDs guardados en wordmill/.emr_state)"
+# (CLUSTER_ID/BUCKET/REGION ya quedaron en wordmill/.emr_state al crear el cluster)

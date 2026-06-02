@@ -4,26 +4,33 @@ aws s3api create-bucket --bucket mi-hive-wordmill --region us-east-1
 # 2. Generar texto (~2MB → 200MB server-side, ~1 min)
 python3 wordmill/scripts/build_text.py --s3 mi-hive-wordmill
 
-# 3a. Cluster + job sin key pair (solo queries via script)
-bash wordmill/scripts/run_hive.sh --bucket mi-hive-wordmill
-
-# 3b. Cluster + job CON key pair (habilita sesión Hive interactiva)
+# 3. Cluster + tabla de entrada (usa --key-pair para habilitar la sesión interactiva)
+#    El conteo NO se precalcula: el step solo deja lista la tabla wm_input.
 bash wordmill/scripts/run_hive.sh --bucket mi-hive-wordmill --key-pair <nombre-del-key-pair>
 
-# 4. Ver resultados del job inicial (stdout del step de Hive)
+# 4. (opcional) Ver el log del step de setup
 aws s3 cp s3://mi-hive-wordmill/logs/<cluster-id>/steps/<step-id>/stdout.gz - | gunzip -c
 
-# 5. Sesión Hive interactiva (requiere haber usado --key-pair en el paso 3b)
+# 5. Sesión Hive interactiva — AQUÍ se cuenta de verdad
 bash wordmill/scripts/hive_shell.sh
-# Dentro de Hive puedes escribir cualquier consulta:
-#   SELECT word, total FROM wm_wordcount ORDER BY total DESC LIMIT 10;
-#   SELECT COUNT(*) FROM wm_wordcount;
-#   SELECT * FROM wm_wordcount WHERE word = 'light';
-#   SELECT word, total FROM wm_wordcount WHERE total BETWEEN 100 AND 500 ORDER BY total DESC LIMIT 20;
+
+# 6. Dentro de Hive, escribe el conteo TÚ MISMO. Hive imprime "Time taken: N seconds"
+#    al terminar → ese es el tiempo real del conteo distribuido.
+#    (consultas de referencia en wordmill/hql/queries.hql)
+#
+#   -- Las 10 palabras más frecuentes:
+#   SELECT word, COUNT(*) AS total
+#   FROM wm_input
+#   LATERAL VIEW EXPLODE(SPLIT(LOWER(line), '[^a-z]+')) tokens AS word
+#   WHERE LENGTH(word) > 1
+#   GROUP BY word
+#   ORDER BY total DESC
+#   LIMIT 10;
+#
 #   exit;
 
-# 6. Terminar cluster (evitar costos)
+# 7. Terminar cluster (evitar costos)
 aws emr terminate-clusters --cluster-ids <cluster-id-del-paso-3>
 
-# 7. Limpieza total
+# 8. Limpieza total
 bash wordmill/scripts/cleanup.sh
