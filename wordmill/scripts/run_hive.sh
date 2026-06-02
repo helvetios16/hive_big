@@ -109,9 +109,11 @@ echo "[ 3/4 ] Creando cluster EMR (1 master + 1 core m4.large)..."
 echo "        Aplicaciones: Hadoop + Hive"
 echo "        (puede tardar 5-10 min)"
 
-EC2_ATTRS=""
+# Roles explícitos en UN solo --ec2-attributes (no mezclar con --use-default-roles,
+# que inyecta su propio --ec2-attributes y colisiona cuando añadimos KeyName).
+EC2_ATTRS="InstanceProfile=EMR_EC2_DefaultRole"
 if [[ -n "$KEY_PAIR" ]]; then
-  EC2_ATTRS="--ec2-attributes KeyName=$KEY_PAIR"
+  EC2_ATTRS="$EC2_ATTRS,KeyName=$KEY_PAIR"
   echo "        Key pair : $KEY_PAIR"
 fi
 
@@ -122,12 +124,12 @@ CLUSTER_ID=$(aws emr create-cluster \
   --instance-groups \
     "InstanceGroupType=MASTER,InstanceCount=1,InstanceType=m4.large" \
     "InstanceGroupType=CORE,InstanceCount=1,InstanceType=m4.large" \
-  --use-default-roles \
+  --service-role EMR_DefaultRole \
+  --ec2-attributes "$EC2_ATTRS" \
   --region "$REGION" \
   --log-uri "s3://$BUCKET/logs/" \
   --no-auto-terminate \
   --enable-debugging \
-  $EC2_ATTRS \
   --query 'ClusterId' \
   --output text)
 
