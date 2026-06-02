@@ -6,6 +6,11 @@ python3 wordmill/scripts/build_text.py --s3 mi-hive-wordmill
 
 # 3. Cluster + tabla de entrada (usa --key-pair para habilitar la sesión interactiva)
 #    El conteo NO se precalcula: el step solo deja lista la tabla wm_input.
+#    El script sondea cada 30s y muestra un timer [mm:ss] por etapa; al final
+#    imprime un resumen con la duración de cada fase:
+#      ── Tiempos ──
+#        Aprovisionar cluster : <mm:ss>   (crear EMR + estado WAITING, ~5-8 min)
+#        Setup tabla (step)   : <mm:ss>   (crear wm_input, ~1 min)
 bash wordmill/scripts/run_hive.sh --bucket mi-hive-wordmill --key-pair <nombre-del-key-pair>
 
 # 4. (opcional) Ver el log del step de setup
@@ -15,7 +20,8 @@ aws s3 cp s3://mi-hive-wordmill/logs/<cluster-id>/steps/<step-id>/stdout.gz - | 
 bash wordmill/scripts/hive_shell.sh
 
 # 6. Dentro de Hive, escribe el conteo TÚ MISMO. Hive imprime "Time taken: N seconds"
-#    al terminar → ese es el tiempo real del conteo distribuido.
+#    al terminar → ese es el TIEMPO REAL DEL CONTEO distribuido (etapa clave a medir,
+#    independiente de los tiempos de preparación del paso 3).
 #    (consultas de referencia en wordmill/hql/queries.hql)
 #
 #   -- Las 10 palabras más frecuentes:
