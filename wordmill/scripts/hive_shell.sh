@@ -30,18 +30,16 @@ fi
 # ── Obtener datos del master ──────────────────────────────────────────────────
 echo "Obteniendo datos del master..."
 
-MASTER_DNS=$(aws emr describe-cluster \
+# DNS y AZ del master en una sola consulta a EMR (sin ec2:DescribeInstances)
+read -r MASTER_DNS AZ < <(aws emr describe-cluster \
   --cluster-id "$CLUSTER_ID" --region "$REGION" \
-  --query 'Cluster.MasterPublicDnsName' --output text)
+  --query 'Cluster.[MasterPublicDnsName, Ec2InstanceAttributes.Ec2AvailabilityZone]' \
+  --output text)
 
 MASTER_ID=$(aws emr list-instances \
   --cluster-id "$CLUSTER_ID" --region "$REGION" \
   --instance-group-type MASTER \
   --query 'Instances[0].Ec2InstanceId' --output text)
-
-AZ=$(aws ec2 describe-instances \
-  --region "$REGION" --instance-ids "$MASTER_ID" \
-  --query 'Reservations[0].Instances[0].Placement.AvailabilityZone' --output text)
 
 echo "  Master DNS : $MASTER_DNS"
 echo "  Instance   : $MASTER_ID  ($AZ)"

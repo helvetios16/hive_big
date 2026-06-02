@@ -13,18 +13,14 @@ bash wordmill/scripts/run_hive.sh --bucket mi-hive-wordmill --key-pair <nombre-d
 # 4. Ver resultados del job inicial (stdout del step de Hive)
 aws s3 cp s3://mi-hive-wordmill/logs/<cluster-id>/steps/<step-id>/stdout.gz - | gunzip -c
 
-# 5a. Sesión Hive interactiva (requiere haber usado --key-pair en el paso 3b)
-bash wordmill/scripts/hive_shell.sh --key ~/.ssh/mi-key.pem
+# 5. Sesión Hive interactiva (requiere haber usado --key-pair en el paso 3b)
+bash wordmill/scripts/hive_shell.sh
 # Dentro de Hive puedes escribir cualquier consulta:
 #   SELECT word, total FROM wm_wordcount ORDER BY total DESC LIMIT 10;
 #   SELECT COUNT(*) FROM wm_wordcount;
+#   SELECT * FROM wm_wordcount WHERE word = 'light';
+#   SELECT word, total FROM wm_wordcount WHERE total BETWEEN 100 AND 500 ORDER BY total DESC LIMIT 20;
 #   exit;
-
-# 5b. Query rápida sin entrar al shell (no necesita key pair)
-bash wordmill/scripts/query.sh "SELECT word, total FROM wm_wordcount ORDER BY total DESC LIMIT 10"
-bash wordmill/scripts/query.sh "SELECT COUNT(*) FROM wm_wordcount"
-bash wordmill/scripts/query.sh "SELECT * FROM wm_wordcount WHERE word = 'light'"
-bash wordmill/scripts/query.sh "SELECT word, total FROM wm_wordcount WHERE total BETWEEN 100 AND 500 ORDER BY total DESC LIMIT 20"
 
 # 6. Terminar cluster (evitar costos)
 aws emr terminate-clusters --cluster-ids <cluster-id-del-paso-3>
