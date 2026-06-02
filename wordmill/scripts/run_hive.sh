@@ -6,23 +6,35 @@
 #   python3 wordmill/scripts/build_text.py --s3 <bucket>
 #
 # Uso:
-#   bash wordmill/scripts/run_hive.sh                          # bucket por defecto
-#   bash wordmill/scripts/run_hive.sh --bucket mi-hive-wordmill
-#   bash wordmill/scripts/run_hive.sh --bucket <b> --region us-west-2
+#   bash wordmill/scripts/run_hive.sh --bucket <b>
+#   bash wordmill/scripts/run_hive.sh --bucket <b> --key-pair <kp>
+#   bash wordmill/scripts/run_hive.sh --bucket <b> --key-pair <kp> --core-count 4
+#   bash wordmill/scripts/run_hive.sh --bucket <b> --core-count 4 --instance-type m5.xlarge
+#
+# Flags:
+#   --bucket <b>          bucket S3 con input/text.txt ya subido
+#   --key-pair <kp>       habilita la sesión Hive interactiva (hive_shell.sh)
+#   --core-count <n>      nº de nodos CORE (default 1; para 18GB usa 4)
+#   --instance-type <t>   tipo de instancia (default m4.large)
+#   --region <r>          región AWS (default us-east-1)
 # =============================================================================
 set -euo pipefail
 
 BUCKET="mi-hive-wordmill"
 REGION="us-east-1"
 KEY_PAIR=""
+CORE_COUNT=1          # nº de nodos CORE (súbelo para datasets grandes, p.ej. 18GB → 4)
+INSTANCE_TYPE="m4.large"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HQL_LOCAL="$ROOT_DIR/wordmill/hql/setup.hql"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --bucket)   BUCKET="$2";   shift 2 ;;
-    --region)   REGION="$2";   shift 2 ;;
-    --key-pair) KEY_PAIR="$2"; shift 2 ;;
+    --bucket)        BUCKET="$2";        shift 2 ;;
+    --region)        REGION="$2";        shift 2 ;;
+    --key-pair)      KEY_PAIR="$2";      shift 2 ;;
+    --core-count)    CORE_COUNT="$2";    shift 2 ;;
+    --instance-type) INSTANCE_TYPE="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -33,6 +45,7 @@ echo "║   WordCount — Apache Hive en Amazon EMR          ║"
 echo "╚══════════════════════════════════════════════════╝"
 echo "  Bucket : s3://$BUCKET"
 echo "  Región : $REGION"
+echo "  Nodos  : 1 master + $CORE_COUNT core ($INSTANCE_TYPE)"
 echo ""
 
 # ── Verificar AWS ─────────────────────────────────────────────────────────────
@@ -105,7 +118,7 @@ wait_con_timer() {
 
 # ── Crear cluster EMR con Hadoop + Hive ───────────────────────────────────────
 echo ""
-echo "[ 3/4 ] Creando cluster EMR (1 master + 1 core m4.large)..."
+echo "[ 3/4 ] Creando cluster EMR (1 master + $CORE_COUNT core $INSTANCE_TYPE)..."
 echo "        Aplicaciones: Hadoop + Hive"
 echo "        (puede tardar 5-10 min)"
 
@@ -122,8 +135,8 @@ CLUSTER_ID=$(aws emr create-cluster \
   --release-label emr-7.0.0 \
   --applications Name=Hadoop Name=Hive \
   --instance-groups \
-    "InstanceGroupType=MASTER,InstanceCount=1,InstanceType=m4.large" \
-    "InstanceGroupType=CORE,InstanceCount=1,InstanceType=m4.large" \
+    "InstanceGroupType=MASTER,InstanceCount=1,InstanceType=$INSTANCE_TYPE" \
+    "InstanceGroupType=CORE,InstanceCount=$CORE_COUNT,InstanceType=$INSTANCE_TYPE" \
   --service-role EMR_DefaultRole \
   --ec2-attributes "$EC2_ATTRS" \
   --region "$REGION" \
