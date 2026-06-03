@@ -134,23 +134,29 @@ for Y in $YEARS; do
         TOTAL=$((TOTAL + 1)); continue
       fi
       echo "── $FILE  (era $ERA) ──"
-      if curl -fSL --retry 3 -o "$DEST" "$URL" 2>/dev/null; then
+      if curl -fSL --retry 5 --retry-all-errors --retry-delay 5 -o "$DEST" "$URL" 2>/dev/null; then
         echo "  ✓ $(du -h "$DEST" | cut -f1)  →  $DEST"
         TOTAL=$((TOTAL + 1))
       else
-        echo "  ⚠ no disponible (¿mes futuro / sin publicar?). Se omite."
+        echo "  ⚠ falló (404 sin publicar, o throttling de la CDN). Re-ejecuta el comando."
         rm -f "$DEST"; FALLOS=$((FALLOS + 1))
       fi
     else
-      LOCAL="$TMP_DIR/$FILE"
       echo "── $FILE  (era $ERA) ──"
-      if curl -fSL --retry 3 -o "$LOCAL" "$URL" 2>/dev/null; then
+      # Idempotente: si ya está en S3, no lo vuelve a bajar (re-ejecuta sin re-throttle)
+      if aws s3 ls "s3://$BUCKET/raw_$ERA/$FILE" >/dev/null 2>&1; then
+        echo "  = ya está en s3://$BUCKET/raw_$ERA/, se omite."
+        TOTAL=$((TOTAL + 1)); continue
+      fi
+      LOCAL="$TMP_DIR/$FILE"
+      # --retry-all-errors + delay: reintenta también ante 403/429 (throttling CDN)
+      if curl -fSL --retry 5 --retry-all-errors --retry-delay 5 -o "$LOCAL" "$URL" 2>/dev/null; then
         aws s3 cp "$LOCAL" "s3://$BUCKET/raw_$ERA/$FILE"
         rm -f "$LOCAL"
         echo "  ✓ s3://$BUCKET/raw_$ERA/$FILE"
         TOTAL=$((TOTAL + 1))
       else
-        echo "  ⚠ no disponible (¿mes futuro / sin publicar?). Se omite."
+        echo "  ⚠ falló (404 sin publicar, o throttling de la CDN). Re-ejecuta el comando."
         FALLOS=$((FALLOS + 1))
       fi
     fi
