@@ -18,14 +18,19 @@
 --
 -- Se omiten airport_fee / cbd_congestion_fee (cambian de nombre/tipo entre
 -- años y ninguna consulta de la actividad las usa).
+--
+-- tpep_pickup_datetime / tpep_dropoff_datetime se declaran BIGINT: en el
+-- Parquet son int64 en microsegundos y Hive NO los lee como TIMESTAMP
+-- (los entrega como long). partition.hql los convierte a TIMESTAMP real con
+-- CAST(from_unixtime(col DIV 1000000) AS TIMESTAMP).
 -- ============================================================
 
 -- ── Era A : 2020-01 .. 2023-01  (DOUBLE counts, BIGINT ids) ───────────
 DROP TABLE IF EXISTS taxi_raw_a;
 CREATE EXTERNAL TABLE taxi_raw_a (
     vendorid               BIGINT,
-    tpep_pickup_datetime   BIGINT,   -- Parquet int64 (microsegundos); Hive no lo
-    tpep_dropoff_datetime  BIGINT,   -- lee como TIMESTAMP, se convierte en partition.hql
+    tpep_pickup_datetime   BIGINT,
+    tpep_dropoff_datetime  BIGINT,
     passenger_count        DOUBLE,
     trip_distance          DOUBLE,
     ratecodeid             DOUBLE,
@@ -49,8 +54,8 @@ LOCATION '${hivevar:INA}';
 DROP TABLE IF EXISTS taxi_raw_b;
 CREATE EXTERNAL TABLE taxi_raw_b (
     vendorid               INT,
-    tpep_pickup_datetime   BIGINT,   -- Parquet int64 (microsegundos); Hive no lo
-    tpep_dropoff_datetime  BIGINT,   -- lee como TIMESTAMP, se convierte en partition.hql
+    tpep_pickup_datetime   BIGINT,
+    tpep_dropoff_datetime  BIGINT,
     passenger_count        BIGINT,
     trip_distance          DOUBLE,
     ratecodeid             BIGINT,
