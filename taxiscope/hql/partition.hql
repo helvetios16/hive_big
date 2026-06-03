@@ -7,6 +7,11 @@
 -- HDFS (hdfs:///user/hive/warehouse/taxi_part) → esto es "cargar los datos
 -- en HDFS". Particionar por (anio, mes) permite partition pruning.
 --
+-- TIMESTAMPS: en el Parquet del TLC son int64 en MICROSEGUNDOS y Hive no los
+-- decodifica como TIMESTAMP (los entrega como BIGINT). Por eso las tablas
+-- externas los declaran BIGINT y aquí se convierten:
+--     CAST(from_unixtime(micros DIV 1000000) AS TIMESTAMP)
+--
 -- Tipos unificados: passenger_count/ratecodeid -> DOUBLE,
 --                   vendorid/pulocationid/dolocationid -> BIGINT.
 -- ============================================================
@@ -43,34 +48,57 @@ CREATE TABLE taxi_part (
 PARTITIONED BY (anio INT, mes INT)
 STORED AS PARQUET;
 
--- ── Carga era A (tipos ya compatibles con la tabla unificada) ─────────
+-- ── Carga era A (ids/counts ya compatibles; solo convierte timestamps) ─
 INSERT INTO TABLE taxi_part PARTITION (anio, mes)
 SELECT
-    vendorid, tpep_pickup_datetime, tpep_dropoff_datetime,
+    vendorid, pickup_ts, dropoff_ts,
     passenger_count, trip_distance, ratecodeid, store_and_fwd_flag,
     pulocationid, dolocationid, payment_type, fare_amount, extra,
     mta_tax, tip_amount, tolls_amount, improvement_surcharge,
     total_amount, congestion_surcharge,
-    YEAR(tpep_pickup_datetime)  AS anio,
-    MONTH(tpep_pickup_datetime) AS mes
-FROM taxi_raw_a
-WHERE tpep_pickup_datetime IS NOT NULL
-  AND YEAR(tpep_pickup_datetime) BETWEEN 2020 AND 2025;
+    YEAR(pickup_ts)  AS anio,
+    MONTH(pickup_ts) AS mes
+FROM (
+    SELECT
+        vendorid, passenger_count, trip_distance, ratecodeid,
+        store_and_fwd_flag, pulocationid, dolocationid, payment_type,
+        fare_amount, extra, mta_tax, tip_amount, tolls_amount,
+        improvement_surcharge, total_amount, congestion_surcharge,
+        CAST(from_unixtime(tpep_pickup_datetime  DIV 1000000) AS TIMESTAMP) AS pickup_ts,
+        CAST(from_unixtime(tpep_dropoff_datetime DIV 1000000) AS TIMESTAMP) AS dropoff_ts
+    FROM taxi_raw_a
+) a
+WHERE pickup_ts IS NOT NULL
+  AND YEAR(pickup_ts) BETWEEN 2020 AND 2025;
 
--- ── Carga era B (CAST de ids a BIGINT y counts a DOUBLE) ──────────────
+-- ── Carga era B (CAST de ids a BIGINT, counts a DOUBLE, + timestamps) ──
 INSERT INTO TABLE taxi_part PARTITION (anio, mes)
 SELECT
-    CAST(vendorid AS BIGINT), tpep_pickup_datetime, tpep_dropoff_datetime,
-    CAST(passenger_count AS DOUBLE), trip_distance,
-    CAST(ratecodeid AS DOUBLE), store_and_fwd_flag,
-    CAST(pulocationid AS BIGINT), CAST(dolocationid AS BIGINT),
-    payment_type, fare_amount, extra, mta_tax, tip_amount, tolls_amount,
-    improvement_surcharge, total_amount, congestion_surcharge,
-    YEAR(tpep_pickup_datetime)  AS anio,
-    MONTH(tpep_pickup_datetime) AS mes
-FROM taxi_raw_b
-WHERE tpep_pickup_datetime IS NOT NULL
-  AND YEAR(tpep_pickup_datetime) BETWEEN 2020 AND 2025;
+    vendorid, pickup_ts, dropoff_ts,
+    passenger_count, trip_distance, ratecodeid, store_and_fwd_flag,
+    pulocationid, dolocationid, payment_type, fare_amount, extra,
+    mta_tax, tip_amount, tolls_amount, improvement_surcharge,
+    total_amount, congestion_surcharge,
+    YEAR(pickup_ts)  AS anio,
+    MONTH(pickup_ts) AS mes
+FROM (
+    SELECT
+        CAST(vendorid AS BIGINT)         AS vendorid,
+        CAST(passenger_count AS DOUBLE)  AS passenger_count,
+        trip_distance,
+        CAST(ratecodeid AS DOUBLE)       AS ratecodeid,
+        store_and_fwd_flag,
+        CAST(pulocationid AS BIGINT)     AS pulocationid,
+        CAST(dolocationid AS BIGINT)     AS dolocationid,
+        payment_type, fare_amount, extra, mta_tax, tip_amount,
+        tolls_amount, improvement_surcharge, total_amount,
+        congestion_surcharge,
+        CAST(from_unixtime(tpep_pickup_datetime  DIV 1000000) AS TIMESTAMP) AS pickup_ts,
+        CAST(from_unixtime(tpep_dropoff_datetime DIV 1000000) AS TIMESTAMP) AS dropoff_ts
+    FROM taxi_raw_b
+) b
+WHERE pickup_ts IS NOT NULL
+  AND YEAR(pickup_ts) BETWEEN 2020 AND 2025;
 
 -- Verificar las particiones creadas
 SHOW PARTITIONS taxi_part;

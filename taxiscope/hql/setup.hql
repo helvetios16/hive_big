@@ -24,8 +24,8 @@
 DROP TABLE IF EXISTS taxi_raw_a;
 CREATE EXTERNAL TABLE taxi_raw_a (
     vendorid               BIGINT,
-    tpep_pickup_datetime   TIMESTAMP,
-    tpep_dropoff_datetime  TIMESTAMP,
+    tpep_pickup_datetime   BIGINT,   -- Parquet int64 (microsegundos); Hive no lo
+    tpep_dropoff_datetime  BIGINT,   -- lee como TIMESTAMP, se convierte en partition.hql
     passenger_count        DOUBLE,
     trip_distance          DOUBLE,
     ratecodeid             DOUBLE,
@@ -49,8 +49,8 @@ LOCATION '${hivevar:INA}';
 DROP TABLE IF EXISTS taxi_raw_b;
 CREATE EXTERNAL TABLE taxi_raw_b (
     vendorid               INT,
-    tpep_pickup_datetime   TIMESTAMP,
-    tpep_dropoff_datetime  TIMESTAMP,
+    tpep_pickup_datetime   BIGINT,   -- Parquet int64 (microsegundos); Hive no lo
+    tpep_dropoff_datetime  BIGINT,   -- lee como TIMESTAMP, se convierte en partition.hql
     passenger_count        BIGINT,
     trip_distance          DOUBLE,
     ratecodeid             BIGINT,
